@@ -135,8 +135,9 @@ io_signature::sptr rsp_impl::args_to_io_sig(const struct stream_args_t& args) co
 // Sample rate methods
 double rsp_impl::set_sample_rate(const double rate)
 {
+    // accept all sample rates as long as they are in range
     std::vector<double> valid_rates = get_sample_rates();
-    if (!std::binary_search(valid_rates.begin(), valid_rates.end(), rate)) {
+    if (rate < valid_rates.front() || rate > valid_rates.back()) {
         GR_LOG_WARN(d_logger, boost::format("invalid sample rate: %lgHz") % rate);
         return get_sample_rate();
     }
@@ -153,20 +154,18 @@ double rsp_impl::set_sample_rate(const double rate)
         sample_rate = 2000e3 / decimation;
         if_type = sdrplay_api_IF_1_620;
     } else {
-        int new_decimation;
-        double new_fsHz;
-        for (new_decimation = 1; new_decimation <= 32; new_decimation *= 2) {
-            new_fsHz = rate * new_decimation;
-            if (new_fsHz > 2000e3) {
+        for (decimation = 1; decimation <= 32; decimation *= 2) {
+            fsHz = rate * decimation;
+            if (fsHz > 2000e3) {
                 break;
             }
         }
-        if (new_decimation <= 32) {
-            decimation = new_decimation;
-            fsHz = new_fsHz;
-            sample_rate = rate;
-            if_type = sdrplay_api_IF_Zero;
+        if (decimation > 32) {
+            GR_LOG_WARN(d_logger, boost::format("invalid sample rate: %lgHz") % rate);
+            return get_sample_rate();
         }
+        sample_rate = rate;
+        if_type = sdrplay_api_IF_Zero;
     }
     update_sample_rate_and_decimation(fsHz, decimation, if_type);
     return get_sample_rate();
@@ -180,8 +179,8 @@ double rsp_impl::get_sample_rate() const
 const std::vector<double> rsp_impl::get_sample_rates() const
 {
     static const std::vector<double> rates = { 62.5e3, 125e3, 250e3, 500e3,
-            1000e3, 1920e3, 2000e3, 2048e3, 3000e3, 4000e3, 5000e3, 6000e3,
-            7000e3, 8000e3, 9000e3, 10000e3 };
+            1000e3, 2000e3, 2048e3, 3000e3, 4000e3, 5000e3, 6000e3, 7000e3,
+            8000e3, 9000e3, 10000e3 };
     return rates;
 }
 
@@ -242,11 +241,6 @@ const double (&rsp_impl::get_freq_range() const)[2]
 // Bandwidth methods
 double rsp_impl::set_bandwidth(const double bandwidth)
 {
-    if (bandwidth > sample_rate) {
-        GR_LOG_WARN(d_logger, boost::format("invalid bandwidth: %lf - cannot be  greater than sample rate: %lf") % bandwidth % sample_rate);
-        return get_bandwidth();
-    }
-
     // add 1kHz to the bandwidth to give it a little margin
     double bwplus1 = bandwidth + 1e3;
     sdrplay_api_Bw_MHzT bw_type;
